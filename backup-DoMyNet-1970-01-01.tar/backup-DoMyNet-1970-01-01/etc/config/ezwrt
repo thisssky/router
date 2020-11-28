@@ -1,0 +1,23 @@
+
+config ezconfig 'sysconfig'
+	option auto_reboot '0'
+	option rebooted '0'
+	option pub_acc 'domynetpublic'
+	option pub_pwd 'f5704f5660ce2d6'
+	option webguide '0'
+	option state '6'
+
+config ezconfig 'sysinfo'
+	option version '00.00.00.01'
+	option virgin '1'
+
+config ezconfig 'clsstatus'
+	option sid '1'
+	option cid '0'
+	option last_sid '0'
+	option last_rst '0'
+
+config ezconfig 'clsconfig'
+	list server 'https://domy-apis.ezlink-wifi.com/'
+	list server 'https://172.100.0.211:11090'
+

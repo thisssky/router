@@ -1,0 +1,33 @@
+
+config wifi-device 'mt7610'
+	option type 'mt7610'
+	option vendor 'ralink'
+	option channel '0'
+	option autoch '2'
+	option txpower '17'
+
+config wifi-iface
+	option device 'mt7610'
+	option ifname 'rai0'
+	option network 'lan'
+	option mode 'ap'
+	option ssid 'DoMyNet_9604'
+	option key '123456789'
+	option encryption 'psk2'
+
+config wifi-device 'mt7620'
+	option type 'mt7620'
+	option vendor 'ralink'
+	option channel '0'
+	option autoch '2'
+	option txpower '17'
+
+config wifi-iface
+	option device 'mt7620'
+	option ifname 'ra0'
+	option network 'lan'
+	option mode 'ap'
+	option ssid 'DoMyNet_9604'
+	option key '123456789'
+	option encryption 'psk2'
+

@@ -1,0 +1,9 @@
+# Put your custom commands here that should be executed once
+# the system init finished. By default this file does nothing.
+#[ -f /usr/bin/btnd ] && /usr/bin/btnd wps 2 &
+[ -f /usr/bin/btnd ] && /usr/bin/btnd reset 13 &
+[ -f /usr/bin/watchdog ] && /usr/bin/watchdog &
+[ -f /etc/btnd/init_env.sh ] && sh /etc/btnd/init_env.sh &
+
+exit 0
+

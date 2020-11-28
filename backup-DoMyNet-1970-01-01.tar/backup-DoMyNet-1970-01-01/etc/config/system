@@ -1,0 +1,11 @@
+config system
+	option hostname	DoMyNet
+	option timezone	CST-8
+
+config timeserver ntp
+	list server ntp.ops.domybox.net
+	list server	0.cn.pool.ntp.org
+	list server	1.cn.pool.ntp.org
+	list server	2.cn.pool.ntp.org
+	list server	3.cn.pool.ntp.org
+	option enable_server 0
