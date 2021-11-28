@@ -1,0 +1,56 @@
+#!/bin/sh
+
+firewall_flush() {
+    iptables -t nat -F "$1" 2> /dev/null
+    iptables -t mangle -D fwmark -p tcp -m set --match-set "rr_404" dst -m comment --comment "$1" -j MARK --set-mark 0x02/0x00000002 2> /dev/null
+}
+
+firewall_set() {
+    iptables -t nat -N "$1" 2> /dev/null
+    # rule, http only
+    if ! iptables -t nat -S prerouting_lan_rule | grep -q "$1"
+    then
+	iptables -t nat -A prerouting_lan_rule -p tcp --dport 80 -j "$1"
+    fi
+    if ! iptables -t nat -S prerouting_guest_rule 2> /dev/null | grep -q "$1"
+    then
+	iptables -t nat -A prerouting_guest_rule -p tcp --dport 80 -j "$1" 2> /dev/null
+    fi
+
+    if /usr/sbin/vasinfo_fw.sh status
+    then
+       if ! iptables -t nat -S "$1" | grep -q 'rr_sj'
+       then
+	   ipset -q -n list "rr_sj" >/dev/null && {
+	       iptables -t nat -A "$1" -m set --match-set "rr_sj" dst -p tcp -j REDIRECT --to-ports 8382
+	   }
+       fi
+    fi
+
+    if ! iptables -t nat -S "$1" | grep -q 'rr_tb'
+    then
+	ipset -q -n list "rr_tb" >/dev/null && {
+	    iptables -t nat -A "$1" -m set --match-set "rr_tb" dst -p tcp -j REDIRECT --to-ports 8380
+	}
+    fi
+
+    # mark in mangle
+    if ! iptables -t mangle -S fwmark | grep -q "$1"; then
+	ipset -q -n list "rr_404" >/dev/null && {
+	    iptables -t mangle -A fwmark -p tcp -m set --match-set "rr_404" dst -m comment --comment "$1" -j MARK --set-mark 0x02/0x02
+	}
+    fi
+}
+
+case $1 in
+    reload)
+	firewall_flush "rr_rule"
+	firewall_set "rr_rule"
+    ;;
+    start)
+	firewall_set "rr_rule"
+    ;;
+    flush)
+	firewall_flush "rr_rule"
+    ;;
+esac

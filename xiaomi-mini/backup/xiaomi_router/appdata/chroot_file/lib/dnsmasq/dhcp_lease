@@ -1,0 +1,37 @@
+#!/bin/sh
+
+SCRIP_PATH='/lib/dnsmasq/lease.d'
+
+dlog() {
+    logger -s -p 6 -t "dnsmasq.d" "$@"
+}
+
+run_scripts() {
+    dlog "Begin run dns add script in $SCRIP_PATH"
+    for i in $SCRIP_PATH/*; do
+	dlog "exec $i $@"
+	$i "$@" 2>&1
+    done
+    dlog "End run script"
+}
+
+remove_nak_entry() {
+    . /usr/share/libubox/jshn.sh
+    json_init
+    json_add_string ip "$2"
+    json_add_string delete true
+    ubus call trafficd ip "$(json_dump)"
+    dlog "ubus call traffice delete $2 at $1"
+}
+
+echo '0' > "/proc/$$/oom_score_adj"
+case "$1" in
+    "add" | "old" | "del" )
+	run_scripts "$@"
+    ;;
+    nak)
+	shift
+	remove_nak_entry "$@"
+    ;;
+esac
+

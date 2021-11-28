@@ -1,0 +1,33 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+dlog() {
+    logger -s -t revproxy "$1"
+}
+
+# do for earch rule set
+handle_rule_set() {
+    local config="$1"
+    local src_dport=
+    local dest_port=
+    local src_dname=
+    local ipset_name=
+    config_get_bool enabled "$config" enabled
+    [ "$enabled" == '1' ] || exit 0
+    config_get src_dport "$config" src_dport
+    config_get dest_port "$config" dest_port
+    config_get src_dname "$config" src_dname
+    config_get ipset_name "$config" ipset
+    [ -n "$src_dname" ] || exit 0
+    iptables -t nat -N $config 2> /dev/null && {
+	iptables -t nat -A prerouting_lan_rule -p tcp --dport $src_dport -j $config
+	iptables -t nat -A prerouting_guest_rule -p tcp --dport $src_dport -j $config
+    }
+    iptables -t nat -S gwd_proxy | grep -q 'match-set' || {
+	iptables -t nat -A $config -m set --match-set $ipset_name dst -p tcp -j REDIRECT --to-ports $dest_port
+    }
+}
+
+config_load revproxy
+config_foreach handle_rule_set domain_dest

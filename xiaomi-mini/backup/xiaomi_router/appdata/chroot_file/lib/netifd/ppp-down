@@ -1,0 +1,23 @@
+#!/bin/sh
+PPP_IPPARAM="$6"
+. /lib/netifd/netifd-proto.sh
+. /lib/xq-misc/phy_switch.sh
+
+proto_init_update "$IFNAME" 0
+proto_send_update "$PPP_IPPARAM"
+
+[ -d /etc/ppp/ip-down.d ] && {
+	for SCRIPT in /etc/ppp/ip-down.d/*
+	do
+		[ -x "$SCRIPT" ] && "$SCRIPT" "$@"
+	done
+}
+
+if sw_wan_link_detect
+then
+    ethstat='p'
+else
+    ethstat='u'
+fi
+logger -p 4 -t netifd-hotplug "HotPlugEvent: ifdown on WAN ${ethstat}"
+logger stat_points_privacy pppoe_down="${ethstat}"

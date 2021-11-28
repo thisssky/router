@@ -1,0 +1,48 @@
+#!/bin/sh /etc/rc.common
+
+START=97
+STOP=20
+
+#export command line for /usr/sbin/supervisord
+
+
+export EXTRA_HELP="	status	Status the service"
+export EXTRA_COMMANDS="status"
+export PROC_USE_CGROUP_PATH="/dev/cgroup/net_cls/limited/tasks;/dev/cgroup/mem/group1/tasks"
+
+USB_DEPLOY_ROOT_PATH=$1
+
+if [ -n "$USB_DEPLOY_ROOT_PATH" ];then
+	export PROCLINE="$USB_DEPLOY_ROOT_PATH/xiaomi_router/bin/plugincenter"
+	export PROC_EXT_LIB_PATH="$USB_DEPLOY_ROOT_PATH/xiaomi_router/lib"
+	export PROC_FAST_REBOOT="1"
+fi
+
+
+start() {
+
+	/usr/sbin/supervisord start
+	return $?
+}
+
+restart() {
+	stop
+	sleep 1
+	start
+	return $?
+}
+
+shutdown() {
+	stop
+	return $?
+}
+
+stop() {
+	/usr/sbin/supervisord stop
+	return $?
+}
+status() {
+	/usr/sbin/supervisord status
+	return $?
+}
+#

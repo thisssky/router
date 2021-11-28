@@ -1,0 +1,15 @@
+#!/bin/sh
+# Copyright (C) 2006-2010 OpenWrt.org
+# Copyright (C) 2010 Vertical Communications
+
+# Set date to kernel compile date. Avoid 1970-1-1 issue.
+set_date() {
+	time=`uname -v | awk '{print $(NF-5) " " $(NF-4) " " $(NF-3)  " " $(NF-2) " " $NF}'`
+	date -D \"%c\" -s \""$time"\"
+	# default use China Standard Timezone
+	echo "CST-8" > /tmp/TZ
+	date -k
+}
+
+boot_hook_add preinit_main set_date
+

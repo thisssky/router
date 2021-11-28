@@ -1,0 +1,13 @@
+#!/bin/sh
+# Copyright (C) 2006 OpenWrt.org
+# Copyright (C) 2010 Vertical Communications
+
+init_hotplug() {
+   echo "$HOTPLUG" > /proc/sys/kernel/hotplug
+
+   mkdir -p /tmp/mnt
+   [ -d /extdisks ] && mount --bind /tmp/mnt /extdisks
+}
+
+boot_hook_add preinit_main init_hotplug
+

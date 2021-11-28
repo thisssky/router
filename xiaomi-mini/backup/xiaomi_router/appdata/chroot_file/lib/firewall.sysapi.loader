@@ -1,0 +1,11 @@
+#!/bin/sh
+#
+#sysapi firewall script
+#
+#include by /etc/config/firewall
+#
+if [ -x /usr/sbin/sysapi.firewall ]
+	then
+	/usr/sbin/sysapi.firewall $@
+fi
+#

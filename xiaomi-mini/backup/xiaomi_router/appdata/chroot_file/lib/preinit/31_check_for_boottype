@@ -1,0 +1,17 @@
+#!/bin/sh
+
+# Copyright (C) 2006-2010 OpenWrt.org
+# Copyright (C) 2010 Vertical Communications
+
+check_for_boottype() {
+	flag=`uci get misc.check_for_boottype.flag31`
+	if [ "$flag" = "1" ]; then
+		   pi_mount_skip_next=false
+	else
+		   pi_mount_skip_next=true
+	fi
+
+}
+
+boot_hook_add preinit_mount_root check_for_boottype
+

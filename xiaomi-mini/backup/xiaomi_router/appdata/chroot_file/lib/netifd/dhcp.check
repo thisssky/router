@@ -1,0 +1,169 @@
+#!/bin/sh
+#
+export LANG=C
+#
+. /lib/lib.scripthelper.sh
+#
+export NETWORKENVFILE='/tmp/network.env'
+#
+
+if [ ! -s "$NETWORKENVFILE" ]
+	then
+	dlog "WARNING: NETWORKENVFILE $NETWORKENVFILE no exist or empty."
+	exit 0
+fi
+
+. "$NETWORKENVFILE"
+
+case "$NETWORKACTION" in
+	renew|bound|connected)
+		NETWORKACTION="$NETWORKACTION"
+	;;
+	deconfig)
+		exit 0
+	;;
+	*)
+		dlog "ERROR: unknow NETWORKACTION: $NETWORKACTION"
+		exit 0
+	;;
+esac
+#
+#echo "$INTERFACE $PHYDEV $ROUTER $SUBNET $ISPDNS $ISPSERVERID $IPADDR $ISPDOMAIN $ISPSERVERID" | grep -q '  '
+echo "$INTERFACE $PHYDEV $ROUTER $SUBNET $ISPDNS $ISPSERVERID $IPADDR $ISPSERVERID" | grep -q '  '
+if [ $? -eq 0 ]
+	then
+	dlog "ERROR: no all ENV VAR exported: $NETWORKENVFILE"
+	dlog "INFO: dhcp client $NETWORKACTION, INTERFACE=$INTERFACE PHYDEV=$PHYDEV ROUTER=$ROUTER SUBNET=$SUBNET ISPDNS=$ISPDNS ISPSERVERID=$ISPSERVERID IPADDR=$IPADDR ISPDOMAIN=$ISPDOMAIN ISPSERVERID=$ISPSERVERID"
+	exit 1
+fi
+#
+#sample info, do not remove
+#ENV:
+#ARGS:deconfig/bound/renew
+#INTERFACE=wan
+#interface=eth0.2
+#ROUTER=10.237.100.1
+#IPADDR=10.237.100.118
+#SUBNET=255.255.255.0
+#mask=24
+#ISPDOMAIN=mioffice.cn
+#ISPDNS=10.237.8.8
+#ISPSERVERID=10.237.8.8
+#lease=432000
+
+#sample info, do not remove
+#arping -D -f -w 5 -I eth0.2 -s 0.0.0.0 10.237.100.66
+#ARPING to 10.237.100.66 from 10.237.100.118 via eth0.2
+#Unicast reply from 10.237.100.66 [14:fe:b5:e6:fc:68] 0.385ms
+#Sent 1 probe(s) (1 broadcast(s))
+#Received 1 replies (0 request(s), 0 broadcast(s))
+
+#check arp of IPADDR befor bound, return 0 for ok, 1 for error, and write syslog
+#compare wan IPADDR/mask to lan IPADDR/mask
+befor_bound(){
+	test "$PHYDEV" != 'eth0.2' && return 0
+	test -z "$IPADDR" && return 0
+	arping -D -f -w 5 -I $PHYDEV -s 0.0.0.0 $IPADDR > /tmp/dhcp.${PHYDEV}.befor_bound.log 2>&1
+	dupmac=$(cat /tmp/dhcp.${PHYDEV}.befor_bound.log | grep "reply from $IPADDR "|head -n 1|tr -d '[]'|awk '{print $5}'|tr '[a-z]' '[A-Z]')
+	if [ -n "$dupmac" ]
+		then
+		dlog "#"
+		dlog "INFO: arping -D -f -w 5 -I $PHYDEV -s 0.0.0.0 $IPADDR"
+		dlog "ERROR: interface ${INTERFACE}(${interface} $(ifconfig eth0.2|grep 'HWaddr '|awk '{print $5}')) $IPADDR confict:"
+		dlog "INFO: got lease IPADDR $IPADDR from dhcp server ${ISPSERVERID}, but confict with host ${dupmac}"
+		dlog "INFO: contract your network administartor for help."
+		cat /tmp/dhcp.${PHYDEV}.befor_bound.log | pipelog dlog
+		return 1
+	fi
+	return 0
+}
+#
+#check gateway arp/ping ISPDNS/resolv ISPDNS after bound, return 0 for ok, 1 for error, and write syslog
+after_bound(){
+	errcode=0
+	if [ "$PHYDEV" = 'eth0.2' ]
+		then
+		if [ -n "$ROUTER" ]
+			then
+			arping -f -w 5 -I $PHYDEV -s 0.0.0.0 $ROUTER > /tmp/dhcp.${PHYDEV}.after_bound.log 2>&1
+			dupmac=$(cat /tmp/dhcp.${PHYDEV}.after_bound.log | grep "reply from $ROUTER "|head -n 1|tr -d '[]'|awk '{print $5}'|tr '[a-z]' '[A-Z]')
+			if [ -z "$dupmac" ]
+				then
+				dlog "#"
+				dlog "INFO: arping -f -w 5 -I $PHYDEV -s 0.0.0.0 $ROUTER"
+				dlog "ERROR: got ROUTER IPADDR $ROUTER from dhcp server ${ISPSERVERID}, but arping failed."
+				dlog "INFO: contract your network administartor for help."
+				cat /tmp/dhcp.${PHYDEV}.after_bound.log | pIPADDRedlog
+				errcode=1
+			fi
+		else
+			dlog "#"
+			dlog "WARNING: dhcp server ${ISPSERVERID} do not offer default ROUTER."
+		fi
+		#192.168.1.0     0.0.0.0         255.255.255.0   U     0      0        0 br-lan
+		lannet=$(ip route list dev br-lan | head -n1|pipegetspacepos 1)
+		wannet=$(ip route list dev eth0.2 | head -n1|pipegetspacepos 1)
+		if [ "$lannet" = "$wannet" ]
+			then
+			dlog "#"
+			dlog "WARNING: wan network $wannet is confict with lan network $lannet"
+			dlog "WARNING: wan link will not work."
+			dlog "INFO: contract your network administartor for help."
+		fi
+	fi
+	if [ -n "$ISPDNS" ]
+		then
+		ISPDNSokcnt=0
+		for onedup in 1 2 3 4 5
+		do
+			for oneISPDNS in $ISPDNS
+			do
+				addrlist=`/usr/sbin/nslookupt 127.0.0.1 $oneISPDNS 3`
+				ret=`echo "$addrlist" | awk -F'/' '{print $3}'`
+				if [ -n "$ret" ]
+					then
+					let ISPDNSokcnt=$ISPDNSokcnt+1
+					slog defun-${oneISPDNS} release
+				else
+					slog defun-${oneISPDNS} dlog "#"
+					slog defun-${oneISPDNS} dlog "WARNING: ISPDNS server $oneISPDNS check failed."
+				fi
+			done
+			if [ $ISPDNSokcnt -ne 0 ]
+				then
+				break
+			fi
+		done
+		if [ $ISPDNSokcnt -eq 0 ]
+			then
+			dlog "#"
+			dlog "WARNING: all ISPDNS server $ISPDNS check failed."
+			errcode=1
+		fi
+	else
+		dlog "#"
+		dlog "WARNING: dhcp server ${ISPSERVERID} do not offer DNS server."
+	fi
+	return $errcode
+}
+#
+#run in daemon
+#
+if [ "$1" != 'nodaemon' ]
+	then
+	#
+	procdaemon mute
+	#
+	dlog "INFO: $NETWORKACTION, INTERFACE=$INTERFACE PHYDEV=$PHYDEV ROUTER=$ROUTER SUBNET=$SUBNET ISPDNS=$ISPDNS ISPSERVERID=$ISPSERVERID IPADDR=$IPADDR ISPDOMAIN=$ISPDOMAIN ISPSERVERID=$ISPSERVERID"
+	#
+	sleep 10
+	#
+fi
+#
+befor_bound
+test $? -ne 0 && dlog "WARNING: dhcp client $NETWORKACTION, befor_bound check failed."
+sleep 1
+after_bound
+test $? -ne 0 && dlog "WARNING: dhcp client $NETWORKACTION, after_bound check failed."
+exit 0
+#

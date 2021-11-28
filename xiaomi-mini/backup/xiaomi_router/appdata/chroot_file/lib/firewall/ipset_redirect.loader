@@ -1,0 +1,34 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+dlog() {
+    logger -s -t ipset_redirect "$1"
+}
+
+# do for earch rule set
+handle_rule_set() {
+    local config="$1"
+    local src_port=
+    local dest_port=
+    local set_name=
+    config_get_bool enabled "$config" enabled
+    [ "$enabled" == '1' ] || exit 0
+    config_get src_port "$config" src_port
+    [ -z $src_port ] && exit 0
+    config_get dest_port "$config" dest_port
+    [ -z $dest_port ] && exit 0
+    config_get set_name "$config" match_set
+    [ -z $set_name ] && exit 0
+
+    # create ipset group
+    ipset create $set_name hash:ip > /dev/null 2>&1
+
+    # del and add ipt rule
+    iptables -t nat -D PREROUTING -i br-lan -p tcp --dport $src_port -m set --match-set $set_name dst -j REDIRECT --to-ports $dest_port > /dev/null 2>&1
+    iptables -t nat -I PREROUTING -i br-lan -p tcp --dport $src_port -m set --match-set $set_name dst -j REDIRECT --to-ports $dest_port > /dev/null 2>&1
+}
+
+config_load ipset_redirect
+config_foreach handle_rule_set redirect
+

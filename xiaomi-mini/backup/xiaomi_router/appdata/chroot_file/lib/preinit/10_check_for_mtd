@@ -1,0 +1,26 @@
+#!/bin/sh
+
+# Copyright (C) 2006-2010 OpenWrt.org
+# Copyright (C) 2010 Vertical Communications
+
+mount_no_mtd() {
+    model=`nvram get model`
+    [ "$model" = "R1CM" ] && mtd unlock OS1
+    [ "$model" = "R2CM" ] && mtd unlock OS1
+    [ "$model" = "R1D" ] && mtd unlock rootfs
+    [ "$model" = "R1CQ" ] && mtd unlock OS1
+	[ "$model" = "R1CL" ] && mtd unlock OS1
+	[ "$model" = "R4A" ] && mtd unlock OS1
+    mount -o remount,rw /dev/root /
+}
+
+check_for_mtd() {
+    check_skip || {
+	grep -qs overlay /proc/mtd || {
+	    mount_no_mtd && pi_mount_skip_next=true
+	}
+    }
+}
+
+boot_hook_add preinit_mount_root check_for_mtd
+

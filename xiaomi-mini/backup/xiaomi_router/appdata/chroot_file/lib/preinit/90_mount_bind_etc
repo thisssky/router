@@ -1,0 +1,197 @@
+#!/bin/sh
+# Copyright (C) 2006-2010 OpenWrt.org
+# Copyright (C) 2010 Vertical Communications
+
+
+# When we failed  mount /data, the whole mtd partition will be automatically erased by "mtd erase overlay"
+# thus we lose all config files. here we try to save the day
+do_data_mount_fail_recover() {
+	local rec_mtd_name="cfg_bak"
+
+	[ -f /tmp/need_config_recovery ] || return 0
+	rm -f /tmp/need_config_recovery
+
+	rec_mtd=$(find_mtd_part "$rec_mtd_name")
+	[ -z "$rec_mtd" ] && return 0
+
+	dd if="$rec_mtd" of=/tmp/head.bin bs=4 count=1
+	head=`hexdump -e '1/4 "%.6x"' /tmp/head.bin`
+	[ "$head" = "088b1f" ] || return 0
+
+	#found a valid gzip header
+	echo "Data fail etc recover..."
+	dd if="$rec_mtd" of=/tmp/rec.tar.gz bs=2048
+	mkdir -p /tmp/tmpconfig
+	tar -xzf /tmp/rec.tar.gz -C /tmp/tmpconfig
+	[ "$?" = "0" ] || {
+		echo "Fail to extract backup config"
+		return 0
+	}
+	cp -rf /tmp/tmpconfig/etc/config/* /etc/config/
+	rm -rf /tmp/tmpconfig/etc/config
+}
+
+# Check uci config files in /etc/config/. Corrupted uci configs could cause uci deadloop
+# Recovery sequence:
+# 1. from mtd cfg_bak partition [TBD]
+# 2. from the other system's config (/data/etc_bak)
+# 3. from rootfs
+do_uci_config_integrity_check() {
+	for file in `find /data/etc/config -type f`
+	do
+		cat $file > /dev/null
+		[ "$?" = "0" ] && continue
+
+		[ -d /data/etc_bak ] && {
+			bakfile=`echo $file | sed "s/\/data\/etc/\/data\/etc_bak/g"`
+			[ -f "$bakfile" ] && {
+				rm -f $file
+				cp $bakfile $file
+				echo Recover $file from the other system
+				continue
+			}
+		}
+
+		rootfs_file=`echo $file | sed "s/\/data\/etc/\/etc/g"`
+		[ -f "$rootfs_file" ] && {
+			rm -f $file
+			cp $rootfs_file $file
+			echo Recover $file from rootfs
+			continue
+		}
+
+		# Can't recover. Remove the file to prevent trouble.
+		rm -f $file
+	done
+}
+
+
+do_recovery_config() {
+	if [ ! -f /etc/remove.conf ]
+	then
+		echo " ************* WARNING *******************"
+		echo " ***** /rom/etc/remove.conf no exist and try to rsync files ****"
+	else
+		echo " *****ota: remove files in /etc/remove.conf *****"
+		cat /etc/remove.conf | xargs rm -rf
+	fi
+
+	echo N | cp -ri /etc/* /data/etc 2>/dev/null
+}
+
+# Process /etc under different scenario
+# Return 1 if OTA scenario. otherwise return 0
+process_etc() {
+	# for: 1, ota; 2, format disk; 3, downgrade
+
+	mkdir -p /data/etc
+        flag_name=`uci get misc.mount_bind_etc.flag_name`
+	flg_ota=`nvram get flag_ota_reboot`
+	flg_format=`nvram get $flag_name`
+	curr_os=`nvram get flag_boot_rootfs`
+	[ -z "$curr_os" ] && curr_os=0
+	bkup_os=$((1-$curr_os))
+
+	if [ "$flg_format" = "1" ]; then
+		# /data is fresh formated. simply make a copy of /etc
+		rm -rf /data/etc
+		cp -prf /etc /data/etc
+		nvram unset $flag_name
+		nvram unset flag_recover_config
+		nvram commit
+		return 0
+	fi
+
+	# check if we are with correct etc files
+	if [ "$flg_ota" = "0" ]; then
+		flg_try_sys1=`nvram get flag_try_sys1_failed`
+		flg_try_sys2=`nvram get flag_try_sys2_failed`
+
+		# if any fail flag is set, we might need etc recovery
+		if [ "$flg_try_sys1" = "1" -o "$flg_try_sys2" = "1" ]; then
+			echo "System fail flag set. Do etc recovery"
+		else
+			return 0
+		fi
+
+		if [ ! -d /data/etc_bak ]; then
+			echo " WARNING: No etc_bak folder"
+			do_recovery_config
+			return 0
+		fi
+
+		if [ `ls /data/etc_bak | wc -l` -eq 0 ]; then
+			echo " ERROR: Empty backup etc"
+			rm -rf /data/etc_bak
+			do_recovery_config
+			return 0
+		fi
+
+		if [ -f "/data/etc_bak/with_os_0" -a -f "/data/etc_bak/with_os_1" ]; then
+			# something is wrong. assume etc bak is corrupt
+			echo " ERROR: Confusing with etc OS flags"
+			rm -rf /data/etc_bak
+			do_recovery_config
+			return 0
+		fi
+
+		# if backup etc OS number match with current OS number, switch etc
+		if [ -f /data/etc_bak/with_os_"$curr_os" ]; then
+			echo " Use backup etc"
+			mv /data/etc /data/etc_tmp
+			mv /data/etc_bak /data/etc
+			mv /data/etc_tmp /data/etc_bak
+			rm -f /data/etc_bak/with_os*
+			touch /data/etc_bak/with_os_"$bkup_os"
+		fi
+		return 0
+	fi
+
+	if [ "$flg_ota" = "1" ]; then
+		/usr/sbin/config_pre_ota.sh
+
+		do_recovery_config
+		return 1
+	fi
+
+	return 0
+}
+
+do_mount_bind_etc() {
+
+	process_etc
+	post_ota="$?"
+
+	#replace files that size 0 in /data/etc
+	cd /data/etc
+	find . -size 0 | while read line
+	do
+		if [ -s /etc/$line -a -f /etc/$line ]; then
+			echo "/etc damaged, recovering /etc/$line"
+			cp -arf /etc/$line /data/etc/$line
+		fi
+	done
+	cd /
+	sync
+
+	# Do uci conf integrity checks before we mount.bind /etc
+	do_uci_config_integrity_check
+
+	mount --bind /data/etc /etc
+
+	rm -f /etc/with_os*
+	touch /etc/with_os_"$curr_os"
+
+	do_data_mount_fail_recover
+
+	if [ "$post_ota" = "1" ] ; then
+		/usr/sbin/config_post_ota.sh
+	fi
+
+	[ -s /tmp/.uci.disk ] && uci import -f /tmp/.uci.disk && rm -f /tmp/.uci.disk
+	[ -f /etc/sysdisk ] && cp -f /etc/sysdisk /tmp/sysdisk
+
+}
+
+boot_hook_add preinit_main do_mount_bind_etc
+

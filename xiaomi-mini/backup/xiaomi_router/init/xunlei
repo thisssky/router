@@ -1,0 +1,168 @@
+#!/bin/sh /etc/rc.common
+
+START=90
+STOP=20
+
+USB_DEPLOY_ROOT_PATH=$1
+PIPE_PATH="/tmp/thunder/tmp/etm_hubble_report.pipe"
+#flag=`uci get xiaoqiang.common.PRIVACY`
+flag=0
+
+if [ -n "$USB_DEPLOY_ROOT_PATH" ];then
+	XUNLEI_LOG_INI_FILE="$USB_DEPLOY_ROOT_PATH/xiaomi_router/config/log.ini"
+	XUNLEI_LOG_FILE="$USB_DEPLOY_ROOT_PATH/xiaomi_router/log/etm.log"
+	HUBBLE_LOG_INI_FILE="$USB_DEPLOY_ROOT_PATH/xiaomi_router/config/hubble_log.ini"
+	HUBBLE_LOG_FILE="$USB_DEPLOY_ROOT_PATH/xiaomi_router/log/hubble.log"
+fi
+
+export PROCLINE="nice -n 19 $USB_DEPLOY_ROOT_PATH/xiaomi_router/bin/etm --system_path=/tmp/thunder/tmp --disk_cfg=$USB_DEPLOY_ROOT_PATH/xiaomi_router/config/thunder_mounts.cfg --etm_cfg=$USB_DEPLOY_ROOT_PATH/xiaomi_router/config/etm.ini --log_cfg=$XUNLEI_LOG_INI_FILE --deviceid=`/sbin/uci get /etc/config/messaging.deviceInfo.DEVICE_ID` --hardwareid=`/usr/bin/matool --method idForVendor --params adaccf1f-8b8c-edcb-d533-770099d2ef20` --pid_file=/var/run/xunlei.pid --license=1406200001000002q000593w1nt5v16gwfx6cv7n0r --import_v1v2_mode=2 --advanced_hardware_config=0 --hubble_report_pipe_path=$PIPE_PATH --ntfs_type=1"
+export PROCFLAG="$USB_DEPLOY_ROOT_PATH/xiaomi_router/bin/etm --system_path=/tmp/thunder/tmp --disk_cfg=$USB_DEPLOY_ROOT_PATH/xiaomi_router/config/thunder_mounts.cfg --etm_cfg=$USB_DEPLOY_ROOT_PATH/xiaomi_router/config/etm.ini --log_cfg=$XUNLEI_LOG_INI_FILE --deviceid=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx --hardwareid=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx --pid_file=/var/run/xunlei.pid --license=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx --import_v1v2_mode=2 --advanced_hardware_config=0 --hubble_report_pipe_path=$PIPE_PATH --ntfs_type=1"
+export PROC_CHANGE_DIR_PATH="$USB_DEPLOY_ROOT_PATH/xiaomi_router/bin"
+export PROC_FAST_REBOOT="1"
+
+export PROC_USE_CGROUP_PATH="/dev/cgroup/net_cls/limited/tasks;/dev/cgroup/mem/group1/tasks"
+export EXTRA_COMMANDS=" status"
+
+#super-port set
+
+TCPPORTS='1080 4662 2080 2062'
+UDPPORTS='4661 3027 888 666 2037 2061 2048 2066'
+
+#port access forbidden, only limited in localhost
+N_TCPPORTS="9000"
+
+set_xunlei_firewall(){
+	local ctlop="$1"
+	if [ -z "$ctlop" ]
+		then
+		ctlop='stop'
+	fi
+	if [ "$ctlop" != 'stop' -a "$ctlop" != 'start' ]
+		then
+		echo "WARNING: unknow operation: $ctlop, set to stop."
+		ctlop='stop'
+	fi
+	if [ "$ctlop" = 'stop' ]
+		then
+			uci delete firewall.xunleiwantcpports 2>/dev/null
+			uci delete firewall.xunleiwanudpports 2>/dev/null
+			uci delete firewall.xunleiN_TCPports 2>/dev/null
+			uci commit
+			if [ $? -ne 0 ]
+				then
+				echo "ERROR: remove xunleiwan rules config/firewall failed."
+				return 1
+			else
+				fw3 reload >/dev/null 2>&1
+				return $?
+			fi
+		return 0
+	fi
+	#start here
+	uci set firewall.xunleiwantcpports=rule 2>/dev/null
+	uci set firewall.xunleiwantcpports.name="xunlei wan accept tcp port $TCPPORTS" 2>/dev/null
+	uci set firewall.xunleiwantcpports.src=wan 2>/dev/null
+	uci set firewall.xunleiwantcpports.dest_port="${TCPPORTS}" 2>/dev/null
+	uci set firewall.xunleiwantcpports.proto=tcp 2>/dev/null
+	uci set firewall.xunleiwantcpports.target=ACCEPT 2>/dev/null
+
+	uci set firewall.xunleiwanudpports=rule 2>/dev/null
+	uci set firewall.xunleiwanudpports.name="xunlei wan accept udp port $UDPPORTS" 2>/dev/null
+	uci set firewall.xunleiwanudpports.src=wan 2>/dev/null
+	uci set firewall.xunleiwanudpports.dest_port="${UDPPORTS}" 2>/dev/null
+	uci set firewall.xunleiwanudpports.proto=udp 2>/dev/null
+	uci set firewall.xunleiwanudpports.target=ACCEPT 2>/dev/null
+
+    #port limit only for localhost
+	uci set firewall.xunleiN_TCPports=rule 2>/dev/null
+	uci set firewall.xunleiN_TCPports.name="xunlei_port_limit_localhost $N_TCPPORTS" 2>/dev/null
+	uci set firewall.xunleiN_TCPports.src=* 2>/dev/null
+	uci set firewall.xunleiN_TCPports.dest_port="${N_TCPPORTS}" 2>/dev/null
+	uci set firewall.xunleiN_TCPports.proto=tcp 2>/dev/null
+	uci set firewall.xunleiN_TCPports.target=REJECT 2>/dev/null
+
+	uci commit firewall
+
+	if [ $? -ne 0 ]
+		then
+		echo "ERROR: setup xunleiwan rules config/firewall failed."
+		return 1
+	else
+		fw3 reload >/dev/null 2>&1
+		return $?
+	fi
+}
+
+start() {
+	#set_xunlei_firewall start
+	if [ -f $XUNLEI_LOG_INI_FILE ];then
+		rm -f $XUNLEI_LOG_INI_FILE
+	fi
+	if [ -f $HUBBLE_LOG_INI_FILE ];then
+		rm -f $HUBBLE_LOG_INI_FILE
+	fi
+
+	touch $XUNLEI_LOG_INI_FILE &> /dev/null
+	echo "level=WARN" >> "$XUNLEI_LOG_INI_FILE"
+	echo "file=$XUNLEI_LOG_FILE" >> "$XUNLEI_LOG_INI_FILE"
+	echo "max_file_size=2M" >> "$XUNLEI_LOG_INI_FILE"
+	echo "max_file_number=2" >> "$XUNLEI_LOG_INI_FILE"
+	
+	touch $HUBBLE_LOG_INI_FILE &> /dev/null
+	echo "level=WARN" >> "$HUBBLE_LOG_INI_FILE"
+	echo "file=$HUBBLE_LOG_FILE" >> "$HUBBLE_LOG_INI_FILE"
+	echo "max_file_size=2M" >> "$HUBBLE_LOG_INI_FILE"
+	echo "max_file_number=2" >> "$HUBBLE_LOG_INI_FILE"
+
+	if [ -n "$USB_DEPLOY_ROOT_PATH" ];then
+		sed -i "s#/extdisks/[a-z]\{3,4\}[0-9]\{1,2\}/#$USB_DEPLOY_ROOT_PATH/#g" $USB_DEPLOY_ROOT_PATH/xiaomi_router/config/thunder_mounts.cfg
+	fi
+
+	mkdir -p /tmp/thunder/tmp
+	mkdir -p /tmp/thunder/cfg
+
+	[ "$flag" = "1" ] && {
+		echo "start hubble report"
+		$USB_DEPLOY_ROOT_PATH/xiaomi_router/bin/hubble --system_path=/tmp/thunder/tmp --hubble_report_pipe_path=$PIPE_PATH --hubble_log_cfg=$HUBBLE_LOG_INI_FILE --etm_cfg=$USB_DEPLOY_ROOT_PATH/xiaomi_router/config/etm.ini &
+	}
+
+	/usr/sbin/supervisord start
+	return $?
+}
+
+stop() {
+	if [ "$PROC_CALLER" != "/etc/init.d/rcS K shutdown" ]
+		then
+		echo  
+			#set_xunlei_firewall stop
+	fi
+
+	/usr/sbin/supervisord stop
+
+	#killall -9 hubble
+	return $?
+}
+
+restart() {
+	stop
+	sleep 1
+	start
+	return $?
+}
+
+reload(){
+	stop
+	sleep 1
+	rm $USB_DEPLOY_ROOT_PATH/ThunderDB -rf
+	start
+	return $?
+}
+
+status(){
+	/usr/sbin/supervisord status
+	ret=$?
+	echo $ret
+	return $ret
+}
+
+#

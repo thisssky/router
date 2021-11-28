@@ -1,0 +1,66 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=20
+
+#export command line for /usr/sbin/supervisord
+
+USB_DEPLOY_ROOT_PATH=$1
+DEST_PATH=$1/xiaomi_router/appdata 
+
+if [ -n "$USB_DEPLOY_ROOT_PATH" ];then
+export PROCLINE="$USB_DEPLOY_ROOT_PATH/xiaomi_router/bin/mediaservice"
+export PROC_USE_CGROUP_PATH="/dev/cgroup/mem/group1/tasks"
+export PROC_EXT_LIB_PATH="$USB_DEPLOY_ROOT_PATH/xiaomi_router/lib"
+export PROC_FAST_REBOOT="1"
+else
+export PROCLINE="/usr/sbin/mediaservice"
+export PROC_USE_CGROUP_PATH="/dev/cgroup/mem/group1/tasks"
+fi
+
+export EXTRA_COMMANDS="status start_impl"
+
+start_impl() {
+	#处理一部分data文件夹没有写权限的问��
+	#chmod 777 /userdisk/data
+	/usr/sbin/supervisord start
+	return $?
+}
+
+start()
+{
+  appid=2882303761517281003
+  file=$DEST_PATH/app_infos/$appid.manifest 
+  if [ -f $file ]
+  then
+    on=5;
+    status=`sed -n '/^status/s/.*\"\(.*\)\".*/\1/pg' $file` 
+    if [ "$status" = "$on" ] 
+    then
+        start_impl
+        return $?
+    fi
+  fi
+}
+
+restart() {
+	stop
+	sleep 1
+	start
+	return $?
+}
+
+shutdown() {
+	stop
+	return $?
+}
+
+stop() {
+	/usr/sbin/supervisord stop
+	return $?
+}
+status() {
+	/usr/sbin/supervisord status
+	return $?
+}
+#

@@ -1,0 +1,17 @@
+#!/bin/sh
+
+# Copyright (C) 2006-2010 OpenWrt.org
+# Copyright (C) 2010 Vertical Communications
+
+check_for_boottype() {
+
+	#enforce the boot_type = 2
+	flag=`nvram get flag_boot_type`
+	if [ "$flag" != "2" ]; then
+		nvram set flag_boot_type=2
+		nvram commit
+	fi
+}
+
+boot_hook_add preinit_mount_root check_for_boottype
+

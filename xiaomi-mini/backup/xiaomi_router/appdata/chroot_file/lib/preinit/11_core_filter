@@ -1,0 +1,15 @@
+#!/bin/sh 
+# Copyright (C) 2006 OpenWrt.org
+
+do_core_filter() {
+	# [*] bit 0  Dump anonymous private mappings.
+	# [ ] bit 1  Dump anonymous shared mappings.
+	# [*] bit 2  Dump file-backed private mappings.
+	# [ ] bit 3  Dump file-backed shared mappings.
+	# [*] bit 4 (since Linux 2.6.24)Dump ELF headers.
+	# [ ] bit 5 (since Linux 2.6.28)Dump private huge pages.
+	[ -e /proc/1/coredump_filter ] && echo 0x15 > /proc/1/coredump_filter
+}
+
+boot_hook_add preinit_essential do_core_filter
+

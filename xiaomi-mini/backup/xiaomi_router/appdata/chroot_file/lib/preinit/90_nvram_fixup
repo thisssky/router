@@ -1,0 +1,20 @@
+#!/bin/sh
+
+# Some batches of products are manufactured according to an
+# inaccurate product specification, in which bdata ColorType
+# holds color code instead of color.
+# Translate ColorType to color if color is not availble.
+nvram_colortype() {
+	[ -z "$(nvram get color)" ] && {
+		colortype=$(nvram get ColorType)
+		[ -n "$colortype" ] && {
+			nvram set color="$colortype"
+		}
+	}
+}
+
+miwifi_nvram_fixup() {
+	nvram_colortype
+}
+
+boot_hook_add preinit_main miwifi_nvram_fixup

@@ -1,0 +1,223 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2008-2012 OpenWrt.org
+
+START=60
+
+USB_DEPLOY_ROOT_PATH=$1
+DEST_PATH=$1/xiaomi_router/appdata 
+
+#export command line for /usr/sbin/supervisord
+if [ -n "$USB_DEPLOY_ROOT_PATH" ];then
+	export PROCLINE="$USB_DEPLOY_ROOT_PATH/xiaomi_router/bin/smbd -D -s $USB_DEPLOY_ROOT_PATH/xiaomi_router/config/smb.conf --private-dir=$USB_DEPLOY_ROOT_PATH/xiaomi_router/config -l $USB_DEPLOY_ROOT_PATH/xiaomi_router/log"
+	export PROC_EXT_LIB_PATH="$USB_DEPLOY_ROOT_PATH/xiaomi_router/lib"
+	export LD_LIBRARY_PATH="$USB_DEPLOY_ROOT_PATH/xiaomi_router/lib"
+	export PROC_FAST_REBOOT="1"
+fi
+EXTRA_COMMANDS="updateconfig start_impl status"
+
+
+updateconfig() {
+if [ -n "$USB_DEPLOY_ROOT_PATH" ];then
+	config_load "$USB_DEPLOY_ROOT_PATH/xiaomi_router/config/samba"
+fi
+	config_foreach smb_header samba
+	config_foreach smb_add_share sambashare
+
+if [ -n "$USB_DEPLOY_ROOT_PATH" ];then
+	cp -f /var/etc/smb.conf $USB_DEPLOY_ROOT_PATH/xiaomi_router/config/smb.conf
+fi
+}
+
+smb_header() {
+	local interface
+	config_get interface $1 interface "loopback lan"
+
+	# resolve interfaces
+	local interfaces=$(
+		. /lib/functions/network.sh
+
+		local net
+		for net in $interface; do
+			local device
+			network_get_device device "$net" && {
+				local subnet
+				network_get_subnet  subnet "$net" && echo -n "$subnet "
+				network_get_subnet6 subnet "$net" && echo -n "$subnet "
+			}
+
+			echo -n "${device:-$net} "
+		done
+	)
+
+	local name workgroup description charset passwdfile logfile
+	local hostname="$(uci_get system.@system[0].hostname)"
+
+	config_get name        $1 name        "${hostname:-OpenWrt}"
+	config_get workgroup   $1 workgroup   "${hostname:-OpenWrt}"
+	config_get description $1 description "Samba on ${hostname:-OpenWrt}"
+	config_get charset     $1 charset     "UTF8"
+
+	mkdir -p /var/etc
+if [ -n "$USB_DEPLOY_ROOT_PATH" ];then
+	passwdfile="$USB_DEPLOY_ROOT_PATH/xiaomi_router/config/smbpasswd"
+	logfile="$USB_DEPLOY_ROOT_PATH/xiaomi_router/log/samba.log"
+	sed -e "s#|NAME|#$name#g" \
+	    -e "s#|WORKGROUP|#$workgroup#g" \
+	    -e "s#|DESCRIPTION|#$description#g" \
+	    -e "s#|INTERFACES|#$interfaces#g" \
+	    -e "s#|CHARSET|#$charset#g" \
+	    -e "s#|PASSWDFILE|#$passwdfile#g" \
+	    -e "s#|LOGFILE|#$logfile#g" \
+	    $USB_DEPLOY_ROOT_PATH/xiaomi_router/config/smb.conf.template > /var/etc/smb.conf
+fi
+
+	flag=`uci get misc.samba.smb_tune`
+
+        [ "$flag" = "1" ] && {
+                sbuf=`uci get misc.samba.smb_sndbuf`
+                rbuf=`uci get misc.samba.smb_rcvbuf`
+                wcache=`uci get misc.samba.smb_wcache`
+                max_buf=`uci get misc.samba.smb2_max_buf`
+                sed -i "s/socket options =.*/& SO_SNDBUF=$sbuf SO_RCVBUF=$rbuf/" /var/etc/smb.conf
+                [ -n "$wcache" ] && sed -i $'/socket/ a \\\t'"write cache size = $wcache" /var/etc/smb.conf
+                [ -n "$max_buf" ] && sed -i $'/socket/ a \\\t'"smb2 max read = $max_buf" /var/etc/smb.conf
+                [ -n "$max_buf" ] && sed -i $'/socket/ a \\\t'"smb2 max write = $max_buf" /var/etc/smb.conf
+                [ -n "$max_buf" ] && sed -i $'/socket/ a \\\t'"smb2 max trans = $max_buf" /var/etc/smb.conf
+        }
+
+
+	local homes
+	config_get_bool homes $1 homes 0
+	[ $homes -gt 0 ] && {
+		cat <<EOT >> /var/etc/smb.conf
+
+[homes]
+	comment     = Home Directories
+	browsable   = no
+	read only   = no
+	create mode = 0750
+EOT
+	}
+
+if [ -z "$USB_DEPLOY_ROOT_PATH" ];then
+	[ -L /etc/samba/smb.conf ] || ln -nsf /var/etc/smb.conf /etc/samba/smb.conf
+fi
+}
+
+smb_add_share() {
+	local name
+	local path
+	local preexec
+	local users
+	local read_only
+	local guest_ok
+	local create_mask
+	local dir_mask
+	local browseable
+	local force_user
+
+	config_get name $1 name
+	config_get path $1 path
+	config_get preexec $1 preexec
+	config_get users $1 users
+	config_get read_only $1 read_only
+	config_get guest_ok $1 guest_ok
+	config_get create_mask $1 create_mask
+	config_get dir_mask $1 dir_mask
+	config_get browseable $1 browseable
+	config_get force_user $1 force_user
+
+	[ -z "$name" -o -z "$path" ] && return
+
+	echo -e "\n[$name]\n\tpath = $path" >> /var/etc/smb.conf
+	[ -n "$preexec" ] && echo -e "\tpreexec = $preexec" >> /var/etc/smb.conf
+	[ -n "$users" ] && echo -e "\tvalid users = $users" >> /var/etc/smb.conf
+	[ -n "$read_only" ] && echo -e "\tread only = $read_only" >> /var/etc/smb.conf
+	[ -n "$guest_ok" ] && echo -e "\tguest ok = $guest_ok" >> /var/etc/smb.conf
+	[ -n "$create_mask" ] && echo -e "\tcreate mask = $create_mask" >> /var/etc/smb.conf
+	[ -n "$dir_mask" ] && echo -e "\tdirectory mask = $dir_mask" >> /var/etc/smb.conf
+	[ -n "$browseable" ] && echo -e "\tbrowseable = $browseable" >> /var/etc/smb.conf
+	[ -n "$force_user" ] && echo -e "\tforce user = $force_user" >> /var/etc/smb.conf
+}
+
+start_impl() {
+	/usr/sbin/shareUpdate -s
+	updateconfig
+	/usr/sbin/supervisord start
+	#service_start /usr/sbin/smbd -D
+  if [ -n "$USB_DEPLOY_ROOT_PATH" ];then
+    service_start $USB_DEPLOY_ROOT_PATH/xiaomi_router/bin/nmbd -D -s $USB_DEPLOY_ROOT_PATH/xiaomi_router/config/smb.conf -l $USB_DEPLOY_ROOT_PATH/xiaomi_router/log
+  fi
+
+  smbid=`pidof smbd`
+  nmbid=`pidof nmbd`
+  if [ "$smbid"  ]
+  then
+    if [ "$nmbid" ]
+    then 
+      return 0
+    fi
+  fi
+
+  return 1  
+}
+
+
+start()
+{
+  appid=2882303761517280984
+  file=$DEST_PATH/app_infos/$appid.manifest
+  if [ -f $file ]
+  then 
+    on=5;
+    status=`sed -n '/^status/s/.*\"\(.*\)\".*/\1/pg' $file`
+    if [ -n "$status" ]
+    then 
+      if [ "$status" = "$on" ]
+      then 
+        start_impl
+      fi
+    fi
+  fi
+} 
+
+
+stop() {
+	local hotplugStop=$2
+	if [ "$hotplugStop"x == "hotplug"x ];then
+		/usr/sbin/supervisord stop
+		killall -9 nmbd
+	else
+		/usr/sbin/supervisord stop
+		#	service_stop /usr/sbin/smbd
+		if [ -n "$USB_DEPLOY_ROOT_PATH" ];then
+			killall -9 nmbd
+			#service_stop $USB_DEPLOY_ROOT_PATH/xiaomi_router/bin/nmbd
+		else
+			killall -9 nmbd
+			#service_stop /usr/sbin/nmbd
+		fi
+	fi
+}
+
+restart() {
+	stop
+	sleep 3
+	start
+}
+
+reload() {
+	updateconfig
+if [ -n "$USB_DEPLOY_ROOT_PATH" ];then
+	$USB_DEPLOY_ROOT_PATH/xiaomi_router/bin/smbcontrol all reload-config
+else
+	smbcontrol all reload-config
+fi
+}
+
+status() {
+	/usr/sbin/supervisord status
+	ret=$?
+	echo $ret
+	return $ret
+}

@@ -1,0 +1,42 @@
+#!/bin/sh
+# Copyright (C) 2006-2010 OpenWrt.org
+# Copyright (C) 2010 Vertical Communications
+
+find_mount_jffs2() {
+
+
+	overlay_head=`hexdump  -C -n 8 $(find_mtd_part overlay)| awk 'NR<2 {print $2$3$4$5}'`
+	if [ "$overlay_head" = "ffffffff" ] ; then
+		echo "overlay_head  $overlay_head"
+		nvram set  flag_format_overlay=1
+	fi
+
+	mount "$(find_mtd_part overlay)" /data -t jffs2
+	if [ $? -ne 0 ] ; then
+		#data mount failed. this is not suppose to happen.try to recover later
+		touch /tmp/need_config_recovery
+		nvram set flag_format_overlay=1
+
+		mtd erase overlay
+		mount "$(find_mtd_part overlay)" /data -t jffs2
+	fi
+
+	mkdir -p /data/usr/log
+}
+
+jffs2_not_mounted() {
+    if [ "$pi_jffs2_mount_success" != "true" ]; then
+	return 0
+    else
+	return 1
+    fi
+}
+
+do_mount_jffs2() {
+    check_skip || {
+	find_mount_jffs2 && pi_jffs2_mount_success=true
+    }
+}
+
+boot_hook_add preinit_mount_root do_mount_jffs2
+
